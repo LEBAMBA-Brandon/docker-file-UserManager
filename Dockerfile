@@ -1,28 +1,34 @@
-# 1. Utiliser l'image de base pour le web
-FROM gmeligio/flutter-web:3.47.7
+# --- Étape 1 : Build ---
+FROM debian:latest AS builder
 
-# 2. Définir le répertoire de travail
+# Installer les dépendances minimales
+RUN apt-get update && apt-get install -y \
+    curl git wget unzip xz-utils zip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Cloner le SDK Flutter
+RUN git clone https://github.com /usr/local/flutter
+ENV PATH="/usr/local/flutter/bin:/usr/local/flutter/bin/cache/dart-sdk/bin:${PATH}"
+
+# Configurer Flutter pour Docker (Désactive les stats et force le mode Root sans invite)
+ENV PUB_CACHE=/root/.pub-cache
+RUN flutter config --no-analytics \
+    && flutter config --enable-web
+
 WORKDIR /app
 
-# 3. Copier d'abord uniquement la configuration pour optimiser le cache Docker
-COPY pubspec.yaml pubspec.lock ./
+# Correction ici : On utilise une syntaxe qui ne crash pas si pubspec.lock n'existe pas localement
+COPY pubspec.yaml pubspec.lock* ./
 
-# 4. Installer les dépendances
+# Forcer la résolution des dépendances
 RUN flutter pub get
 
-# 5. Copier le reste du code source
+# Copier le reste du projet et compiler
 COPY . .
+RUN flutter build web --release
 
-# 6. Compiler l'application pour le Web (Génère le dossier build/web)
-RUN flutter build web
-
-# 7. Utiliser un serveur HTTP léger pour servir les fichiers statiques générés
-# (Flutter web ne se lance pas avec "flutter main.dart" en production)
+# --- Étape 2 : Production ---
 FROM nginx:alpine
-COPY --from=0 /app/build/web /usr/share/nginx/html
-
-# 8. Exposer le port de Nginx
+COPY --from=builder /app/build/web /usr/share/nginx/html
 EXPOSE 80
-
-# 9. Lancer Nginx
 CMD ["nginx", "-g", "daemon off;"]
